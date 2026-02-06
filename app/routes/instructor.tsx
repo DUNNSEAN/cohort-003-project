@@ -124,6 +124,15 @@ export default function InstructorDashboard({
 
   return (
     <div className="p-6 lg:p-8">
+      {/* Breadcrumb */}
+      <nav className="mb-6 text-sm text-muted-foreground">
+        <Link to="/" className="hover:text-foreground">
+          Home
+        </Link>
+        <span className="mx-2">/</span>
+        <span className="text-foreground">My Courses</span>
+      </nav>
+
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">My Courses</h1>

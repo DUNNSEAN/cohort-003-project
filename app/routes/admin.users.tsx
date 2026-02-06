@@ -344,6 +344,15 @@ export default function AdminUsers({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="p-6 lg:p-8">
+      {/* Breadcrumb */}
+      <nav className="mb-6 text-sm text-muted-foreground">
+        <Link to="/" className="hover:text-foreground">
+          Home
+        </Link>
+        <span className="mx-2">/</span>
+        <span className="text-foreground">Manage Users</span>
+      </nav>
+
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Manage Users</h1>
         <p className="mt-1 text-muted-foreground">
