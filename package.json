@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:seed": "tsx scripts/seed.ts",
-    "loc": "git ls-files | grep -vE '(lock|.db)' | xargs wc -l | tail -1"
+    "loc": "git ls-files | grep -vE '(lock|.db)' | xargs wc -l"
   },
   "dependencies": {
     "@react-router/node": "7.12.0",
