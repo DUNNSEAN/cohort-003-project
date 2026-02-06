@@ -27,6 +27,7 @@ import {
   updateLessonTitle,
   deleteLesson,
   getLessonById,
+  reorderLessons,
 } from "~/services/lessonService";
 import { getEnrollmentCountForCourse } from "~/services/enrollmentService";
 import { getCurrentUserId } from "~/lib/session";
@@ -45,7 +46,6 @@ import {
 import {
   ArrowLeft,
   BookOpen,
-  Circle,
   Clock,
   FileEdit,
   GripVertical,
@@ -250,6 +250,21 @@ export async function action({ params, request }: Route.ActionArgs) {
     const moduleIds: number[] = JSON.parse(moduleIdsJson);
     reorderModules(courseId, moduleIds);
     return { success: true, field: "module-reorder" };
+  }
+
+  if (intent === "reorder-lessons") {
+    const moduleId = parseInt(formData.get("moduleId") as string, 10);
+    const lessonIdsJson = formData.get("lessonIds") as string;
+    if (isNaN(moduleId) || !lessonIdsJson) {
+      return data({ error: "Missing module or lesson IDs." }, { status: 400 });
+    }
+    const mod = getModuleById(moduleId);
+    if (!mod || mod.courseId !== courseId) {
+      return data({ error: "Module not found in this course." }, { status: 404 });
+    }
+    const lessonIds: number[] = JSON.parse(lessonIdsJson);
+    reorderLessons(moduleId, lessonIds);
+    return { success: true, field: "lesson-reorder" };
   }
 
   if (intent === "delete-lesson") {
@@ -881,6 +896,7 @@ export default function InstructorCourseEditor({
   const { course, lessonCount, enrollmentCount } = loaderData;
   const statusFetcher = useFetcher();
   const reorderFetcher = useFetcher();
+  const lessonReorderFetcher = useFetcher();
 
   useEffect(() => {
     if (statusFetcher.state === "idle" && statusFetcher.data?.success) {
@@ -894,6 +910,12 @@ export default function InstructorCourseEditor({
     }
   }, [reorderFetcher.state, reorderFetcher.data]);
 
+  useEffect(() => {
+    if (lessonReorderFetcher.state === "idle" && lessonReorderFetcher.data?.success) {
+      toast.success("Lessons reordered.");
+    }
+  }, [lessonReorderFetcher.state, lessonReorderFetcher.data]);
+
   function handleStatusChange(newStatus: string) {
     statusFetcher.submit(
       { intent: "update-status", status: newStatus },
@@ -901,19 +923,47 @@ export default function InstructorCourseEditor({
     );
   }
 
-  function handleModuleDragEnd(result: DropResult) {
+  function handleDragEnd(result: DropResult) {
     if (!result.destination) return;
-    if (result.source.index === result.destination.index) return;
+    if (
+      result.source.droppableId === result.destination.droppableId &&
+      result.source.index === result.destination.index
+    ) {
+      return;
+    }
 
-    const reordered = Array.from(course.modules);
-    const [moved] = reordered.splice(result.source.index, 1);
-    reordered.splice(result.destination.index, 0, moved);
+    if (result.type === "module") {
+      const reordered = Array.from(course.modules);
+      const [moved] = reordered.splice(result.source.index, 1);
+      reordered.splice(result.destination.index, 0, moved);
 
-    const moduleIds = reordered.map((m) => m.id);
-    reorderFetcher.submit(
-      { intent: "reorder-modules", moduleIds: JSON.stringify(moduleIds) },
-      { method: "post" }
-    );
+      const moduleIds = reordered.map((m) => m.id);
+      reorderFetcher.submit(
+        { intent: "reorder-modules", moduleIds: JSON.stringify(moduleIds) },
+        { method: "post" }
+      );
+    } else if (result.type === "lesson") {
+      // Lessons can only be reordered within the same module
+      if (result.source.droppableId !== result.destination.droppableId) return;
+
+      const moduleId = parseInt(result.source.droppableId.replace("lessons-", ""), 10);
+      const mod = course.modules.find((m) => m.id === moduleId);
+      if (!mod) return;
+
+      const reordered = Array.from(mod.lessons);
+      const [moved] = reordered.splice(result.source.index, 1);
+      reordered.splice(result.destination.index, 0, moved);
+
+      const lessonIds = reordered.map((l) => l.id);
+      lessonReorderFetcher.submit(
+        {
+          intent: "reorder-lessons",
+          moduleId: String(moduleId),
+          lessonIds: JSON.stringify(lessonIds),
+        },
+        { method: "post" }
+      );
+    }
   }
 
   return (
@@ -1012,8 +1062,8 @@ export default function InstructorCourseEditor({
             </CardContent>
           </Card>
         ) : (
-          <DragDropContext onDragEnd={handleModuleDragEnd}>
-            <Droppable droppableId="modules">
+          <DragDropContext onDragEnd={handleDragEnd}>
+            <Droppable droppableId="modules" type="module">
               {(provided) => (
                 <div
                   className="space-y-4"
@@ -1072,42 +1122,76 @@ export default function InstructorCourseEditor({
                                   No lessons yet.
                                 </p>
                               ) : (
-                                <ul className="space-y-1">
-                                  {mod.lessons.map((lesson) => (
-                                    <li key={lesson.id}>
-                                      <div className="flex items-center gap-3 px-3 py-1.5 text-sm">
-                                        <Circle className="size-4 shrink-0 text-muted-foreground" />
-                                        <div className="flex-1">
-                                          <InlineEditableLessonTitle
-                                            value={lesson.title}
-                                            lessonId={lesson.id}
-                                          />
-                                        </div>
-                                        {lesson.durationMinutes && (
-                                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                            <Clock className="size-3" />
-                                            {lesson.durationMinutes}m
-                                          </span>
-                                        )}
-                                        <Link
-                                          to={`/instructor/${course.id}/lessons/${lesson.id}`}
+                                <Droppable
+                                  droppableId={`lessons-${mod.id}`}
+                                  type="lesson"
+                                >
+                                  {(lessonDropProvided) => (
+                                    <ul
+                                      className="space-y-1"
+                                      ref={lessonDropProvided.innerRef}
+                                      {...lessonDropProvided.droppableProps}
+                                    >
+                                      {mod.lessons.map((lesson, lessonIndex) => (
+                                        <Draggable
+                                          key={lesson.id}
+                                          draggableId={`lesson-${lesson.id}`}
+                                          index={lessonIndex}
                                         >
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                                          >
-                                            <FileEdit className="size-3.5" />
-                                          </Button>
-                                        </Link>
-                                        <DeleteLessonButton
-                                          lessonId={lesson.id}
-                                          lessonTitle={lesson.title}
-                                        />
-                                      </div>
-                                    </li>
-                                  ))}
-                                </ul>
+                                          {(lessonProvided, lessonSnapshot) => (
+                                            <li
+                                              ref={lessonProvided.innerRef}
+                                              {...lessonProvided.draggableProps}
+                                            >
+                                              <div
+                                                className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm${
+                                                  lessonSnapshot.isDragging
+                                                    ? " bg-muted shadow-md ring-1 ring-primary/30"
+                                                    : ""
+                                                }`}
+                                              >
+                                                <div
+                                                  {...lessonProvided.dragHandleProps}
+                                                  className="cursor-grab active:cursor-grabbing rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                                                >
+                                                  <GripVertical className="size-4" />
+                                                </div>
+                                                <div className="flex-1">
+                                                  <InlineEditableLessonTitle
+                                                    value={lesson.title}
+                                                    lessonId={lesson.id}
+                                                  />
+                                                </div>
+                                                {lesson.durationMinutes && (
+                                                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                    <Clock className="size-3" />
+                                                    {lesson.durationMinutes}m
+                                                  </span>
+                                                )}
+                                                <Link
+                                                  to={`/instructor/${course.id}/lessons/${lesson.id}`}
+                                                >
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                  >
+                                                    <FileEdit className="size-3.5" />
+                                                  </Button>
+                                                </Link>
+                                                <DeleteLessonButton
+                                                  lessonId={lesson.id}
+                                                  lessonTitle={lesson.title}
+                                                />
+                                              </div>
+                                            </li>
+                                          )}
+                                        </Draggable>
+                                      ))}
+                                      {lessonDropProvided.placeholder}
+                                    </ul>
+                                  )}
+                                </Droppable>
                               )}
                               <AddLessonForm moduleId={mod.id} />
                             </CardContent>
