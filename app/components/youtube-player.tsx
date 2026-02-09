@@ -16,6 +16,7 @@ type YouTubePlayerProps = {
   watchProgress: number;
   trackingEnabled: boolean;
   autoplay?: boolean;
+  onToggleAutoplay?: () => void;
 };
 
 function extractVideoId(url: string): string | null {
@@ -70,6 +71,7 @@ export function YouTubePlayer({
   watchProgress: initialProgress,
   trackingEnabled,
   autoplay = false,
+  onToggleAutoplay,
 }: YouTubePlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YT.Player | null>(null);
@@ -217,6 +219,30 @@ export function YouTubePlayer({
               style={{ width: `${progress}%` }}
             />
           </div>
+        </div>
+      )}
+      {onToggleAutoplay && (
+        <div className="mt-2 flex items-center justify-end">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+            Autoplay
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoplay}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
+                autoplay
+                  ? "border-primary bg-primary"
+                  : "border-input bg-muted"
+              }`}
+              onClick={onToggleAutoplay}
+            >
+              <span
+                className={`inline-block size-3.5 transform rounded-full bg-background shadow-sm transition-transform ${
+                  autoplay ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </label>
         </div>
       )}
     </div>

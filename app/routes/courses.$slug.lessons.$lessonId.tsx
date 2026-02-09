@@ -484,38 +484,17 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
 
         {/* YouTube Video */}
         {lesson.videoUrl && (
-          <>
-            <div className="mb-2 flex items-center justify-end">
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-                Autoplay
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={autoplay}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                    autoplay ? "bg-primary" : "bg-muted"
-                  }`}
-                  onClick={toggleAutoplay}
-                >
-                  <span
-                    className={`inline-block size-3.5 transform rounded-full bg-white transition-transform ${
-                      autoplay ? "translate-x-5" : "translate-x-0.5"
-                    }`}
-                  />
-                </button>
-              </label>
-            </div>
-            <YouTubePlayer
-              videoUrl={lesson.videoUrl}
-              lessonId={lesson.id}
-              title={lesson.title}
-              startPosition={lastWatchPosition}
-              durationMinutes={lesson.durationMinutes}
-              watchProgress={watchProgress}
-              trackingEnabled={enrolled && !!currentUserId}
-              autoplay={autoplay}
-            />
-          </>
+          <YouTubePlayer
+            videoUrl={lesson.videoUrl}
+            lessonId={lesson.id}
+            title={lesson.title}
+            startPosition={lastWatchPosition}
+            durationMinutes={lesson.durationMinutes}
+            watchProgress={watchProgress}
+            trackingEnabled={enrolled && !!currentUserId}
+            autoplay={autoplay}
+            onToggleAutoplay={toggleAutoplay}
+          />
         )}
 
         {/* Lesson Content */}
