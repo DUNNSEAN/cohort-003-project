@@ -33,6 +33,7 @@ import {
   Clock,
   Pencil,
   PlayCircle,
+  Users,
 } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
 import { UserAvatar } from "~/components/user-avatar";
@@ -406,6 +407,12 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
                         </Link>
                       ) : null;
                     })()}
+                  <Link to={teamPurchaseLink}>
+                    <Button variant="outline" className="w-full">
+                      <Users className="mr-2 size-4" />
+                      Buy More Seats
+                    </Button>
+                  </Link>
                 </>
               ) : (
                 enrollButton
