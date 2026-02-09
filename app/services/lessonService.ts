@@ -181,3 +181,48 @@ export function reorderLessons(moduleId: number, lessonIds: number[]) {
   }
   return getLessonsByModule(moduleId);
 }
+
+/**
+ * Move a lesson from one module to another at a specific position.
+ * Closes the gap in the source module and opens a gap in the destination module.
+ */
+export function moveLessonToModule(
+  lessonId: number,
+  targetModuleId: number,
+  targetPosition: number
+) {
+  const lesson = getLessonById(lessonId);
+  if (!lesson) return null;
+
+  const sourceModuleId = lesson.moduleId;
+
+  // 1. Close the gap in the source module
+  db.update(lessons)
+    .set({ position: sql`${lessons.position} - 1` })
+    .where(
+      and(
+        eq(lessons.moduleId, sourceModuleId),
+        gt(lessons.position, lesson.position)
+      )
+    )
+    .run();
+
+  // 2. Open a gap in the destination module
+  db.update(lessons)
+    .set({ position: sql`${lessons.position} + 1` })
+    .where(
+      and(
+        eq(lessons.moduleId, targetModuleId),
+        gte(lessons.position, targetPosition)
+      )
+    )
+    .run();
+
+  // 3. Move the lesson to the target module at the target position
+  return db
+    .update(lessons)
+    .set({ moduleId: targetModuleId, position: targetPosition })
+    .where(eq(lessons.id, lessonId))
+    .returning()
+    .get();
+}

@@ -29,6 +29,7 @@ import {
   deleteLesson,
   getLessonById,
   reorderLessons,
+  moveLessonToModule,
 } from "~/services/lessonService";
 import { getEnrollmentCountForCourse } from "~/services/enrollmentService";
 import { getCurrentUserId } from "~/lib/session";
@@ -271,6 +272,29 @@ export async function action({ params, request }: Route.ActionArgs) {
     const lessonIds: number[] = JSON.parse(lessonIdsJson);
     reorderLessons(moduleId, lessonIds);
     return { success: true, field: "lesson-reorder" };
+  }
+
+  if (intent === "move-lesson") {
+    const lessonId = parseInt(formData.get("lessonId") as string, 10);
+    const targetModuleId = parseInt(formData.get("targetModuleId") as string, 10);
+    const targetPosition = parseInt(formData.get("targetPosition") as string, 10);
+    if (isNaN(lessonId) || isNaN(targetModuleId) || isNaN(targetPosition)) {
+      return data({ error: "Missing move parameters." }, { status: 400 });
+    }
+    const lesson = getLessonById(lessonId);
+    if (!lesson) {
+      return data({ error: "Lesson not found." }, { status: 404 });
+    }
+    const sourceMod = getModuleById(lesson.moduleId);
+    if (!sourceMod || sourceMod.courseId !== courseId) {
+      return data({ error: "Lesson not found in this course." }, { status: 404 });
+    }
+    const targetMod = getModuleById(targetModuleId);
+    if (!targetMod || targetMod.courseId !== courseId) {
+      return data({ error: "Target module not found in this course." }, { status: 404 });
+    }
+    moveLessonToModule(lessonId, targetModuleId, targetPosition);
+    return { success: true, field: "lesson-move" };
   }
 
   if (intent === "delete-lesson") {
@@ -1002,26 +1026,48 @@ export default function InstructorCourseEditor({
         { method: "post" }
       );
     } else if (result.type === "lesson") {
-      // Lessons can only be reordered within the same module
-      if (result.source.droppableId !== result.destination.droppableId) return;
+      const sourceModuleId = parseInt(result.source.droppableId.replace("lessons-", ""), 10);
+      const destModuleId = parseInt(result.destination.droppableId.replace("lessons-", ""), 10);
 
-      const moduleId = parseInt(result.source.droppableId.replace("lessons-", ""), 10);
-      const mod = course.modules.find((m) => m.id === moduleId);
-      if (!mod) return;
+      if (sourceModuleId === destModuleId) {
+        // Reorder within the same module
+        const mod = course.modules.find((m) => m.id === sourceModuleId);
+        if (!mod) return;
 
-      const reordered = Array.from(mod.lessons);
-      const [moved] = reordered.splice(result.source.index, 1);
-      reordered.splice(result.destination.index, 0, moved);
+        const reordered = Array.from(mod.lessons);
+        const [moved] = reordered.splice(result.source.index, 1);
+        reordered.splice(result.destination.index, 0, moved);
 
-      const lessonIds = reordered.map((l) => l.id);
-      lessonReorderFetcher.submit(
-        {
-          intent: "reorder-lessons",
-          moduleId: String(moduleId),
-          lessonIds: JSON.stringify(lessonIds),
-        },
-        { method: "post" }
-      );
+        const lessonIds = reordered.map((l) => l.id);
+        lessonReorderFetcher.submit(
+          {
+            intent: "reorder-lessons",
+            moduleId: String(sourceModuleId),
+            lessonIds: JSON.stringify(lessonIds),
+          },
+          { method: "post" }
+        );
+      } else {
+        // Move lesson to a different module
+        const sourceMod = course.modules.find((m) => m.id === sourceModuleId);
+        if (!sourceMod) return;
+
+        const lesson = sourceMod.lessons[result.source.index];
+        if (!lesson) return;
+
+        // Target position is 1-based (destination index + 1)
+        const targetPosition = result.destination.index + 1;
+
+        lessonReorderFetcher.submit(
+          {
+            intent: "move-lesson",
+            lessonId: String(lesson.id),
+            targetModuleId: String(destModuleId),
+            targetPosition: String(targetPosition),
+          },
+          { method: "post" }
+        );
+      }
     }
   }
 
