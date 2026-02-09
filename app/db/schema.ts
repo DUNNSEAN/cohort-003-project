@@ -25,6 +25,11 @@ export enum QuestionType {
   TrueFalse = "true_false",
 }
 
+export enum TeamMemberRole {
+  Admin = "admin",
+  Member = "member",
+}
+
 // ─── Tables ───
 
 export const users = sqliteTable("users", {
@@ -189,6 +194,46 @@ export const purchases = sqliteTable("purchases", {
     .references(() => courses.id),
   pricePaid: integer("price_paid").notNull(),
   country: text("country"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const teams = sqliteTable("teams", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const teamMembers = sqliteTable("team_members", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  teamId: integer("team_id")
+    .notNull()
+    .references(() => teams.id),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  role: text("role").notNull().$type<TeamMemberRole>(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const coupons = sqliteTable("coupons", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  teamId: integer("team_id")
+    .notNull()
+    .references(() => teams.id),
+  courseId: integer("course_id")
+    .notNull()
+    .references(() => courses.id),
+  code: text("code").notNull().unique(),
+  purchaseId: integer("purchase_id")
+    .notNull()
+    .references(() => purchases.id),
+  redeemedByUserId: integer("redeemed_by_user_id").references(() => users.id),
+  redeemedAt: text("redeemed_at"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
