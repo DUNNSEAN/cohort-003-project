@@ -12,6 +12,8 @@ import { getCurrentUserId } from "~/lib/session";
 import { formatPrice } from "~/lib/utils";
 import { getUserEnrolledCourses } from "~/services/enrollmentService";
 import { calculateProgress, getCompletedLessonCount } from "~/services/progressService";
+import { resolveCountry } from "~/lib/country.server";
+import { calculatePppPrice } from "~/lib/ppp";
 
 export function meta() {
   return [
@@ -35,6 +37,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   );
 
   const currentUserId = await getCurrentUserId(request);
+  const country = await resolveCountry(request);
 
   // Build a map of courseId -> progress for enrolled courses
   const progressMap = new Map<
@@ -53,11 +56,15 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const coursesWithLessonCount = courses.map((course) => {
     const userProgress = progressMap.get(course.id);
+    const pppPrice = course.pppEnabled
+      ? calculatePppPrice(course.price, country)
+      : course.price;
     return {
       ...course,
       lessonCount: getLessonCountForCourse(course.id),
       progress: userProgress?.progress ?? null,
       completedLessons: userProgress?.completedLessons ?? null,
+      pppPrice,
     };
   });
 
@@ -228,7 +235,16 @@ export default function CourseCatalog({ loaderData }: Route.ComponentProps) {
                     {course.instructorName}
                   </span>
                   <span className="font-semibold text-foreground">
-                    {formatPrice(course.price)}
+                    {course.pppPrice < course.price ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-xs line-through text-muted-foreground font-normal">
+                          {formatPrice(course.price)}
+                        </span>
+                        {formatPrice(course.pppPrice)}
+                      </span>
+                    ) : (
+                      formatPrice(course.price)
+                    )}
                   </span>
                 </CardFooter>
               </Card>

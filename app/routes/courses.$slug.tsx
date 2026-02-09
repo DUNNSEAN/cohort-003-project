@@ -16,6 +16,8 @@ import { UserAvatar } from "~/components/user-avatar";
 import { data, isRouteErrorResponse } from "react-router";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
+import { resolveCountry } from "~/lib/country.server";
+import { calculatePppPrice, getCountryTierInfo } from "~/lib/ppp";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Course";
@@ -63,6 +65,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ? await renderMarkdown(courseWithDetails.salesCopy)
     : null;
 
+  const country = await resolveCountry(request);
+  const pppPrice = courseWithDetails.pppEnabled
+    ? calculatePppPrice(courseWithDetails.price, country)
+    : courseWithDetails.price;
+  const tierInfo = getCountryTierInfo(country);
+
   return {
     course: courseWithDetails,
     salesCopyHtml,
@@ -71,6 +79,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     progress,
     lessonProgressMap,
     currentUserId,
+    pppPrice,
+    tierInfo,
   };
 }
 
@@ -128,7 +138,7 @@ export function HydrateFallback() {
 }
 
 export default function CourseDetail({ loaderData }: Route.ComponentProps) {
-  const { course, salesCopyHtml, lessonCount, enrolled, progress, lessonProgressMap, currentUserId } = loaderData;
+  const { course, salesCopyHtml, lessonCount, enrolled, progress, lessonProgressMap, currentUserId, pppPrice, tierInfo } = loaderData;
   const isInstructor = currentUserId === course.instructorId;
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -147,16 +157,29 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
     0
   );
 
-  const priceLabel = formatPrice(course.price);
+  const pppPriceLabel = formatPrice(pppPrice);
+  const isDiscounted = pppPrice < course.price;
 
   const enrollButton = currentUserId ? (
     <div>
-      <div className="mb-3 text-center text-2xl font-bold">
-        {priceLabel}
+      <div className="mb-3 text-center">
+        {isDiscounted ? (
+          <>
+            <div className="text-sm text-muted-foreground line-through">
+              {formatPrice(course.price)}
+            </div>
+            <div className="text-2xl font-bold">{pppPriceLabel}</div>
+            <div className="mt-1 inline-block rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
+              {tierInfo.label} — PPP discount
+            </div>
+          </>
+        ) : (
+          <div className="text-2xl font-bold">{pppPriceLabel}</div>
+        )}
       </div>
       <Link to={`/courses/${course.slug}/purchase`}>
         <Button size="lg" className="w-full">
-          Enroll Now — {priceLabel}
+          Enroll Now — {pppPriceLabel}
         </Button>
       </Link>
     </div>

@@ -17,6 +17,9 @@ import { CourseImage } from "~/components/course-image";
 import { UserAvatar } from "~/components/user-avatar";
 import { data } from "react-router";
 import { formatDuration, formatPrice } from "~/lib/utils";
+import { resolveCountry } from "~/lib/country.server";
+import { calculatePppPrice, getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
+import { createPurchase } from "~/services/purchaseService";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Purchase";
@@ -61,11 +64,24 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     0
   );
 
+  const country = await resolveCountry(request);
+  const pppPrice = courseWithDetails.pppEnabled
+    ? calculatePppPrice(courseWithDetails.price, country)
+    : courseWithDetails.price;
+  const tierInfo = getCountryTierInfo(country);
+  const countryName = country
+    ? COUNTRIES.find((c) => c.code === country)?.name ?? country
+    : null;
+
   return {
     course: courseWithDetails,
     lessonCount,
     enrollmentCount,
     totalDuration,
+    pppPrice,
+    tierInfo,
+    country,
+    countryName,
   };
 }
 
@@ -90,6 +106,12 @@ export async function action({ params, request }: Route.ActionArgs) {
   const intent = formData.get("intent");
 
   if (intent === "confirm-purchase") {
+    const country = await resolveCountry(request);
+    const pppPrice = course.pppEnabled
+      ? calculatePppPrice(course.price, country)
+      : course.price;
+
+    createPurchase(currentUserId, course.id, pppPrice, country);
     enrollUser(currentUserId, course.id, false, false);
     throw redirect(`/courses/${slug}/welcome`);
   }
@@ -100,7 +122,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 export default function PurchaseConfirmation({
   loaderData,
 }: Route.ComponentProps) {
-  const { course, lessonCount, enrollmentCount, totalDuration } = loaderData;
+  const { course, lessonCount, enrollmentCount, totalDuration, pppPrice, tierInfo, countryName } = loaderData;
   const fetcher = useFetcher();
   const isSubmitting = fetcher.state !== "idle";
 
@@ -110,7 +132,7 @@ export default function PurchaseConfirmation({
     }
   }, [fetcher.state, fetcher.data]);
 
-  const priceLabel = formatPrice(course.price);
+  const isDiscounted = pppPrice < course.price;
 
   return (
     <div className="mx-auto max-w-3xl p-6 lg:p-8">
@@ -177,10 +199,30 @@ export default function PurchaseConfirmation({
 
           {/* Price + Confirm */}
           <div className="mt-6 border-t pt-6">
+            {isDiscounted && countryName && (
+              <div className="mb-4 rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
+                <p className="text-sm text-green-800 dark:text-green-300">
+                  PPP discount applied for {countryName} — {tierInfo.label}
+                </p>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-sm text-muted-foreground">Total</span>
-                <div className="text-3xl font-bold">{priceLabel}</div>
+                {isDiscounted ? (
+                  <>
+                    <span className="text-sm text-muted-foreground">Original price</span>
+                    <div className="text-lg text-muted-foreground line-through">
+                      {formatPrice(course.price)}
+                    </div>
+                    <span className="text-sm text-muted-foreground">Your price</span>
+                    <div className="text-3xl font-bold">{formatPrice(pppPrice)}</div>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm text-muted-foreground">Total</span>
+                    <div className="text-3xl font-bold">{formatPrice(pppPrice)}</div>
+                  </>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <Link to={`/courses/${course.slug}`}>
