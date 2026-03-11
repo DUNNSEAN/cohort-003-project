@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "cherry-pick": "ai-hero-cli cherry-pick --branch=live-run-through",
+    "reset": "ai-hero-cli reset --branch=live-run-through",
+    "pull": "ai-hero-cli pull",
     "build": "react-router build",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
