@@ -27,6 +27,7 @@ import {
 } from "~/components/ui/tabs";
 import {
   AlertTriangle,
+  Bookmark,
   BookOpen,
   CheckCircle2,
   Circle,
@@ -47,6 +48,7 @@ import {
   getReviewByUserAndCourse,
 } from "~/services/reviewService";
 import { StarRatingDisplay, StarRatingInput } from "~/components/star-rating";
+import { getBookmarkedLessonIds } from "~/services/bookmarkService";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Course";
@@ -76,6 +78,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let progress = 0;
   let lessonProgressMap: Record<number, string> = {};
   let nextLessonId: number | null = null;
+  let bookmarkedLessonIds: number[] = [];
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
@@ -93,6 +96,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
       const nextLesson = getNextIncompleteLesson(currentUserId, course.id);
       nextLessonId = nextLesson?.id ?? null;
+
+      bookmarkedLessonIds = getBookmarkedLessonIds({
+        userId: currentUserId,
+        courseId: course.id,
+      });
     }
   }
 
@@ -127,6 +135,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     averageRating,
     reviewCount,
     userRating: userReview?.rating ?? null,
+    bookmarkedLessonIds,
   };
 }
 
@@ -198,6 +207,7 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
     averageRating,
     reviewCount,
     userRating: initialUserRating,
+    bookmarkedLessonIds,
   } = loaderData;
   const isInstructor = currentUserId === course.instructorId;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -402,6 +412,7 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
               enrolled={enrolled}
               isInstructor={isInstructor}
               lessonProgressMap={lessonProgressMap}
+              bookmarkedLessonIds={bookmarkedLessonIds}
             />
           </div>
         </div>
@@ -510,6 +521,7 @@ function CourseContent({
   enrolled,
   isInstructor,
   lessonProgressMap,
+  bookmarkedLessonIds,
 }: {
   course: {
     id: number;
@@ -527,7 +539,9 @@ function CourseContent({
   enrolled: boolean;
   isInstructor: boolean;
   lessonProgressMap: Record<number, string>;
+  bookmarkedLessonIds: number[];
 }) {
+  const bookmarkedSet = new Set(bookmarkedLessonIds);
   return (
     <div>
       <h2 className="mb-4 text-2xl font-bold">Course Content</h2>
@@ -540,13 +554,16 @@ function CourseContent({
           {course.modules.map((mod) => (
             <Card key={mod.id}>
               <CardHeader>
-                <h3 className="font-semibold">
+                <h3 className="flex items-center gap-2 font-semibold">
                   <Link
                     to={`/courses/${course.slug}/${mod.id}`}
                     className="hover:underline"
                   >
                     {mod.title}
                   </Link>
+                  {mod.lessons.some((l) => bookmarkedSet.has(l.id)) && (
+                    <Bookmark className="size-3.5 fill-amber-500 text-amber-500" />
+                  )}
                 </h3>
                 <p className="text-sm text-muted-foreground">
                   {mod.lessons.length} lessons
@@ -611,6 +628,9 @@ function CourseContent({
                                   false
                                 )}
                               </span>
+                            )}
+                            {bookmarkedSet.has(lesson.id) && (
+                              <Bookmark className="ml-auto size-4 shrink-0 fill-amber-500 text-amber-500" />
                             )}
                           </Link>
                         ) : (

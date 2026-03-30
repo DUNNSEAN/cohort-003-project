@@ -32,6 +32,11 @@ import {
   deleteComment,
   getCommentById,
 } from "~/services/commentService";
+import {
+  isLessonBookmarked,
+  toggleBookmark,
+  getBookmarkedLessonIds,
+} from "~/services/bookmarkService";
 import { getUserById } from "~/services/userService";
 import { LessonProgressStatus, UserRole } from "~/db/schema";
 import { Button } from "~/components/ui/button";
@@ -53,6 +58,7 @@ import {
   Trophy,
   RotateCcw,
   Trash2,
+  Bookmark,
 } from "lucide-react";
 import { cn, formatDuration } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
@@ -161,6 +167,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let lastWatchPosition = 0;
   let watchProgress = 0;
   let lessonProgressMap: Record<number, string> = {};
+  let isBookmarked = false;
+  let bookmarkedLessonIds: number[] = [];
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
@@ -179,6 +187,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       for (const record of progressRecords) {
         lessonProgressMap[record.lessonId] = record.status;
       }
+
+      // Get bookmark state for this lesson and all lessons in course
+      isBookmarked = isLessonBookmarked({ userId: currentUserId, lessonId });
+      bookmarkedLessonIds = getBookmarkedLessonIds({
+        userId: currentUserId,
+        courseId: course.id,
+      });
 
       // Get video watch state for resume and progress display
       if (lesson.videoUrl) {
@@ -317,6 +332,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     pppPurchaseCountry,
     comments,
     isOwningInstructor,
+    isBookmarked,
+    bookmarkedLessonIds,
   };
 }
 
@@ -413,6 +430,14 @@ export async function action({ params, request }: Route.ActionArgs) {
     return { deleteSuccess: true };
   }
 
+  if (intent === "toggle-bookmark") {
+    if (!isUserEnrolled(currentUserId, course.id)) {
+      throw data("You must be enrolled to bookmark", { status: 403 });
+    }
+    const result = toggleBookmark({ userId: currentUserId, lessonId });
+    return { bookmarked: result.bookmarked };
+  }
+
   throw data("Invalid action", { status: 400 });
 }
 
@@ -466,11 +491,19 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     pppPurchaseCountry,
     comments,
     isOwningInstructor,
+    isBookmarked: initialIsBookmarked,
+    bookmarkedLessonIds,
   } = loaderData;
   const [autoplay, toggleAutoplay] = useAutoplay();
   const fetcher = useFetcher({ key: `mark-complete-${lesson.id}` });
   const quizFetcher = useFetcher({ key: `quiz-${lesson.id}` });
+  const bookmarkFetcher = useFetcher({ key: `bookmark-${lesson.id}` });
   const navigate = useNavigate();
+
+  const isBookmarked =
+    bookmarkFetcher.formData?.get("intent") === "toggle-bookmark"
+      ? (bookmarkFetcher.data?.bookmarked ?? !initialIsBookmarked)
+      : initialIsBookmarked;
 
   const isMarking =
     fetcher.state !== "idle" &&
@@ -538,6 +571,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
         currentLessonId={lesson.id}
         lessonProgressMap={lessonProgressMap}
         enrolled={enrolled}
+        bookmarkedLessonIds={bookmarkedLessonIds}
       />
 
       <div className="flex-1 p-6 lg:p-8">
@@ -585,6 +619,21 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
                   Open Code
                 </Button>
               </a>
+            )}
+            {enrolled && currentUserId && (
+              <bookmarkFetcher.Form method="post">
+                <input type="hidden" name="intent" value="toggle-bookmark" />
+                <Button variant="outline" size="sm" type="submit">
+                  <Bookmark
+                    className={cn(
+                      "size-4",
+                      isBookmarked
+                        ? "fill-amber-500 text-amber-500"
+                        : "text-muted-foreground"
+                    )}
+                  />
+                </Button>
+              </bookmarkFetcher.Form>
             )}
           </div>
 
@@ -746,6 +795,7 @@ function CurriculumSidebar({
   currentLessonId,
   lessonProgressMap,
   enrolled,
+  bookmarkedLessonIds,
 }: {
   course: { id: number; title: string; slug: string };
   curriculum: Array<{
@@ -756,7 +806,9 @@ function CurriculumSidebar({
   currentLessonId: number;
   lessonProgressMap: Record<number, string>;
   enrolled: boolean;
+  bookmarkedLessonIds: number[];
 }) {
+  const bookmarkedSet = new Set(bookmarkedLessonIds);
   // Find which module the current lesson belongs to
   const currentModuleId = curriculum.find((m) =>
     m.lessons.some((l) => l.id === currentLessonId)
@@ -810,6 +862,9 @@ function CurriculumSidebar({
                     )}
                   />
                   <span className="flex-1 text-left">{mod.title}</span>
+                  {mod.lessons.some((l) => bookmarkedSet.has(l.id)) && (
+                    <Bookmark className="size-3.5 shrink-0 fill-amber-500 text-amber-500" />
+                  )}
                 </button>
 
                 {isExpanded && (
@@ -845,6 +900,9 @@ function CurriculumSidebar({
                               <Circle className="size-3.5 shrink-0" />
                             )}
                             <span className="truncate">{l.title}</span>
+                            {bookmarkedSet.has(l.id) && (
+                              <Bookmark className="ml-auto size-3.5 shrink-0 fill-amber-500 text-amber-500" />
+                            )}
                           </Link>
                         </li>
                       );
