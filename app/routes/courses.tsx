@@ -15,6 +15,8 @@ import { getUserEnrolledCourses } from "~/services/enrollmentService";
 import { calculateProgress, getCompletedLessonCount } from "~/services/progressService";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice } from "~/lib/ppp";
+import { getAverageRatingsForCourses } from "~/services/reviewService";
+import { StarRatingDisplay } from "~/components/star-rating";
 
 export function meta() {
   return [
@@ -55,17 +57,22 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
+  const ratingsMap = getAverageRatingsForCourses(courses.map((c) => c.id));
+
   const coursesWithLessonCount = courses.map((course) => {
     const userProgress = progressMap.get(course.id);
     const pppPrice = course.pppEnabled
       ? calculatePppPrice(course.price, country)
       : course.price;
+    const ratingInfo = ratingsMap.get(course.id);
     return {
       ...course,
       lessonCount: getLessonCountForCourse(course.id),
       progress: userProgress?.progress ?? null,
       completedLessons: userProgress?.completedLessons ?? null,
       pppPrice,
+      averageRating: ratingInfo?.averageRating ?? null,
+      reviewCount: ratingInfo?.reviewCount ?? 0,
     };
   });
 
@@ -209,6 +216,12 @@ export default function CourseCatalog({ loaderData }: Route.ComponentProps) {
                   <p className="line-clamp-2 text-sm text-muted-foreground">
                     {course.description}
                   </p>
+                  <div className="mt-2">
+                    <StarRatingDisplay
+                      rating={course.averageRating}
+                      count={course.reviewCount}
+                    />
+                  </div>
                 </CardContent>
                 {course.progress !== null && course.progress > 0 && (
                   <CardContent className="pt-0">
