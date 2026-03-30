@@ -29,6 +29,13 @@
       "when": 1774890035582,
       "tag": "0003_perpetual_orphan",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1774895710387,
+      "tag": "0004_aberrant_bloodstrike",
+      "breakpoints": true
     }
   ]
 }

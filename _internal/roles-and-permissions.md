@@ -23,6 +23,7 @@ Cookie-based sessions (`app/lib/session.ts`) store only the `userId`. The role i
 - Browse and purchase courses
 - Access lessons for **enrolled** courses only
 - Track progress, take quizzes
+- Post comments on lessons they are enrolled in
 - Redeem coupon codes
 - View their dashboard (`/dashboard`)
 
@@ -31,6 +32,8 @@ Cookie-based sessions (`app/lib/session.ts`) store only the `userId`. The role i
 - Everything a student can do, plus:
 - Create new courses (`/instructor/new`)
 - Edit **their own** courses, modules, lessons, and quizzes
+- Post comments on lessons in **their own** courses
+- **Moderate comments** on their own courses' lessons (delete any comment)
 - View enrolled students and their progress (`/instructor/:courseId/students`)
 - Sidebar shows "My Courses"
 

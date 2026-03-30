@@ -270,3 +270,17 @@ export const videoWatchEvents = sqliteTable("video_watch_events", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+export const lessonComments = sqliteTable("lesson_comments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  lessonId: integer("lesson_id")
+    .notNull()
+    .references(() => lessons.id),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  content: text("content").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});

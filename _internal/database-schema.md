@@ -195,6 +195,15 @@ SQLite database using **Drizzle ORM**. Schema defined in `app/db/schema.ts`.
 | `position_seconds` | real | not null |
 | `created_at` | text (ISO string) | not null, default now |
 
+### `lesson_comments`
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | integer | PK, auto-increment |
+| `lesson_id` | integer | not null, FK → lessons.id |
+| `user_id` | integer | not null, FK → users.id |
+| `content` | text | not null |
+| `created_at` | text (ISO string) | not null, default now |
+
 ---
 
 ## Relationships Diagram
@@ -222,6 +231,7 @@ users ─┬─< enrollments >── courses ──< modules ──< lessons
 - **Teams** have members (admin/member roles) and **coupons** tied to a purchase
 - **Coupons** can be redeemed by a user, which triggers enrollment
 - **Video watch events** log playback position for resume functionality
+- **Lesson comments** are posted by enrolled students or the course instructor; flat list (no threading)
 
 ### Notes
 - All timestamps stored as ISO 8601 text strings (not SQLite datetime)
