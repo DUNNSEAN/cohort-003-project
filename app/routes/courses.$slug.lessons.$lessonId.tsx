@@ -66,32 +66,33 @@ import { YouTubePlayer } from "~/components/youtube-player";
 import { UserAvatar } from "~/components/user-avatar";
 import { Textarea } from "~/components/ui/textarea";
 import { data, isRouteErrorResponse } from "react-router";
-import { z } from "zod";
+import * as v from "valibot";
 import { resolveCountry } from "~/lib/country.server";
 import { checkPppAccess, COUNTRIES } from "~/lib/ppp";
 import { findPurchase } from "~/services/purchaseService";
 import { parseFormData, parseParams } from "~/lib/validation";
 
-const lessonParamsSchema = z.object({
-  slug: z.string().min(1),
-  lessonId: z.coerce.number().int(),
+const lessonParamsSchema = v.object({
+  slug: v.pipe(v.string(), v.minLength(1)),
+  lessonId: v.pipe(v.unknown(), v.transform(Number), v.integer()),
 });
 
-const markCompleteSchema = z.object({
-  intent: z.literal("mark-complete"),
+const markCompleteSchema = v.object({
+  intent: v.literal("mark-complete"),
 });
 
-const addCommentSchema = z.object({
-  intent: z.literal("add-comment"),
-  content: z
-    .string()
-    .min(1, "Comment cannot be empty")
-    .max(2000, "Comment is too long"),
+const addCommentSchema = v.object({
+  intent: v.literal("add-comment"),
+  content: v.pipe(
+    v.string(),
+    v.minLength(1, "Comment cannot be empty"),
+    v.maxLength(2000, "Comment is too long")
+  ),
 });
 
-const deleteCommentSchema = z.object({
-  intent: z.literal("delete-comment"),
-  commentId: z.coerce.number().int(),
+const deleteCommentSchema = v.object({
+  intent: v.literal("delete-comment"),
+  commentId: v.pipe(v.unknown(), v.transform(Number), v.integer()),
 });
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
