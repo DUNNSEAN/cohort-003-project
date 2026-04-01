@@ -54,6 +54,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import {
   ArrowLeft,
+  BarChart3,
   BookOpen,
   Clock,
   Eye,
@@ -1176,24 +1177,33 @@ export default function InstructorCourseEditor({
 
       {/* Tabs */}
       <Tabs defaultValue="content">
-        <TabsList>
-          <TabsTrigger value="content">
-            <BookOpen className="size-4" />
-            Content
-          </TabsTrigger>
-          <TabsTrigger value="settings">
-            <Settings className="size-4" />
-            Settings
-          </TabsTrigger>
-          <TabsTrigger value="sales-copy">
-            <FileText className="size-4" />
-            Sales Copy
-          </TabsTrigger>
-          <TabsTrigger value="students">
-            <Users className="size-4" />
-            Students
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center gap-2">
+          <TabsList>
+            <TabsTrigger value="content">
+              <BookOpen className="size-4" />
+              Content
+            </TabsTrigger>
+            <TabsTrigger value="settings">
+              <Settings className="size-4" />
+              Settings
+            </TabsTrigger>
+            <TabsTrigger value="sales-copy">
+              <FileText className="size-4" />
+              Sales Copy
+            </TabsTrigger>
+            <TabsTrigger value="students">
+              <Users className="size-4" />
+              Students
+            </TabsTrigger>
+          </TabsList>
+          <Link
+            to={`/instructor/${course.id}/analytics`}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-muted px-3 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground hover:shadow-sm"
+          >
+            <BarChart3 className="size-4" />
+            Analytics
+          </Link>
+        </div>
 
         {/* Content Tab */}
         <TabsContent value="content" className="mt-6">
