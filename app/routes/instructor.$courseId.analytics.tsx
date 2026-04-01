@@ -6,15 +6,30 @@ import { getCurrentUserId } from "~/lib/session";
 import { UserRole } from "~/db/schema";
 import {
   getCourseAnalyticsStats,
+  getRevenueOverTime,
+  getEnrollmentTrend,
   timeWindowSchema,
   type TimeWindow,
+  type BucketRow,
 } from "~/services/analyticsService";
 import { TimeWindowPicker } from "~/components/analytics/time-window-picker";
 import { StatCard } from "~/components/analytics/stat-card";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { Button } from "~/components/ui/button";
+import { Skeleton } from "~/components/ui/skeleton";
 import { data, isRouteErrorResponse } from "react-router";
 import * as v from "valibot";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Analytics";
@@ -69,8 +84,36 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   ) as TimeWindow;
 
   const stats = getCourseAnalyticsStats({ courseId, window });
+  const revenueOverTime = getRevenueOverTime({ courseId, window });
+  const enrollmentTrend = getEnrollmentTrend({ courseId, window });
 
-  return { course, stats, window };
+  return { course, stats, window, revenueOverTime, enrollmentTrend };
+}
+
+// clientLoader with hydrate = true prevents SSR of charts (Recharts uses browser APIs)
+export async function clientLoader({
+  serverLoader,
+}: Route.ClientLoaderArgs) {
+  return await serverLoader();
+}
+clientLoader.hydrate = true;
+
+export function HydrateFallback() {
+  return (
+    <div className="mx-auto max-w-7xl p-6 lg:p-8">
+      <Skeleton className="mb-6 h-5 w-48" />
+      <Skeleton className="mb-8 h-10 w-64" />
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 w-full rounded-xl" />
+        ))}
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Skeleton className="h-64 w-full rounded-xl" />
+        <Skeleton className="h-64 w-full rounded-xl" />
+      </div>
+    </div>
+  );
 }
 
 function formatRevenue(cents: number): string {
@@ -80,10 +123,82 @@ function formatRevenue(cents: number): string {
   }).format(cents / 100);
 }
 
+function formatRevenueLabel(cents: number): string {
+  if (cents >= 100000) return `$${(cents / 100000).toFixed(1)}k`;
+  return formatRevenue(cents);
+}
+
+function RevenueChart({ data }: { data: BucketRow[] }) {
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <h2 className="mb-4 text-sm font-medium text-muted-foreground">
+        Revenue Over Time
+      </h2>
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+          <XAxis
+            dataKey="bucket"
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            tickFormatter={formatRevenueLabel}
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            width={56}
+          />
+          <Tooltip
+            formatter={(value) => [formatRevenue(Number(value)), "Revenue"]}
+          />
+          <Line
+            type="monotone"
+            dataKey="value"
+            strokeWidth={2}
+            dot={false}
+            className="stroke-primary"
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function EnrollmentChart({ data }: { data: BucketRow[] }) {
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <h2 className="mb-4 text-sm font-medium text-muted-foreground">
+        Enrollment Trend
+      </h2>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+          <XAxis
+            dataKey="bucket"
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            allowDecimals={false}
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            width={32}
+          />
+          <Tooltip formatter={(value) => [Number(value), "Enrollments"]} />
+          <Bar dataKey="value" className="fill-primary" radius={[3, 3, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
-  const { course, stats, window } = loaderData;
-  const { totalRevenue, totalEnrollments, completionRate, avgQuizScore } =
-    stats;
+  const { course, stats, window, revenueOverTime, enrollmentTrend } = loaderData;
+  const { totalRevenue, totalEnrollments, completionRate, avgQuizScore } = stats;
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -118,7 +233,7 @@ export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
         <TimeWindowPicker current={window} />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Total Revenue" value={formatRevenue(totalRevenue)} />
         <StatCard
           title="Total Enrollments"
@@ -129,6 +244,11 @@ export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
           title="Avg Quiz Score"
           value={avgQuizScore !== null ? `${avgQuizScore}%` : "—"}
         />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <RevenueChart data={revenueOverTime} />
+        <EnrollmentChart data={enrollmentTrend} />
       </div>
     </div>
   );

@@ -10,6 +10,8 @@ import {
 } from "~/db/schema";
 import * as v from "valibot";
 
+export type BucketRow = { bucket: string; value: number };
+
 export const timeWindowSchema = v.picklist(["7d", "30d", "90d", "all"]);
 export type TimeWindow = v.InferOutput<typeof timeWindowSchema>;
 
@@ -90,4 +92,141 @@ export function getCourseAnalyticsStats(opts: {
     avgScoreRow?.avg != null ? Math.round(avgScoreRow.avg * 100) : null;
 
   return { totalRevenue, totalEnrollments, completionRate, avgQuizScore };
+}
+
+// ─── Time-series helpers ─────────────────────────────────────────────────────
+
+/** Compute SQLite's strftime('%W', date) week key for a given UTC date. */
+function toWeekKey(date: Date): string {
+  const year = date.getUTCFullYear();
+  const jan1 = new Date(Date.UTC(year, 0, 1));
+  const jan1Mon = (jan1.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+  const firstMondayYday = (7 - jan1Mon) % 7;
+  const yday = Math.floor((date.getTime() - jan1.getTime()) / 86400000);
+  const week =
+    yday < firstMondayYday ? 0 : Math.floor((yday - firstMondayYday) / 7) + 1;
+  return `${year}-${String(week).padStart(2, "0")}`;
+}
+
+/** Return the Monday of the week containing `date` (UTC midnight). */
+function getMondayOf(date: Date): Date {
+  const d = new Date(date);
+  const offset = (d.getUTCDay() + 6) % 7; // days since Monday
+  d.setUTCDate(d.getUTCDate() - offset);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+/** Parse a YYYY-WW week key back to the Monday of that week (UTC midnight). */
+function weekKeyToMonday(key: string): Date {
+  const [yearStr, weekStr] = key.split("-");
+  const year = parseInt(yearStr, 10);
+  const week = parseInt(weekStr, 10);
+  const jan1 = new Date(Date.UTC(year, 0, 1));
+  const jan1Mon = (jan1.getUTCDay() + 6) % 7;
+  const firstMondayYday = (7 - jan1Mon) % 7;
+  const yday = week === 0 ? 0 : firstMondayYday + (week - 1) * 7;
+  const d = new Date(Date.UTC(year, 0, 1));
+  d.setUTCDate(d.getUTCDate() + yday);
+  return d;
+}
+
+/**
+ * Fill zero-value buckets so every day (7d/30d) or week (90d/all) in the
+ * window has an entry, even if there was no activity.
+ *
+ * For the "all" window with no rows, returns an empty array.
+ */
+export function fillBuckets(rows: BucketRow[], window: TimeWindow): BucketRow[] {
+  const rowMap = new Map(rows.map((r) => [r.bucket, r.value]));
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  if (window === "7d" || window === "30d") {
+    const days = window === "7d" ? 7 : 30;
+    const result: BucketRow[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setUTCDate(d.getUTCDate() - i);
+      const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+      result.push({ bucket: key, value: rowMap.get(key) ?? 0 });
+    }
+    return result;
+  }
+
+  // Weekly (90d or all)
+  let startMonday: Date;
+  if (window === "90d") {
+    const start = new Date(today);
+    start.setUTCDate(start.getUTCDate() - 90);
+    startMonday = getMondayOf(start);
+  } else {
+    if (rows.length === 0) return [];
+    const earliest = rows.reduce((a, b) => (a.bucket < b.bucket ? a : b)).bucket;
+    startMonday = weekKeyToMonday(earliest);
+  }
+
+  const todayMonday = getMondayOf(today);
+  const result: BucketRow[] = [];
+  const current = new Date(startMonday);
+  while (current <= todayMonday) {
+    const key = toWeekKey(current);
+    result.push({ bucket: key, value: rowMap.get(key) ?? 0 });
+    current.setUTCDate(current.getUTCDate() + 7);
+  }
+  return result;
+}
+
+export function getRevenueOverTime(opts: {
+  courseId: number;
+  window: TimeWindow;
+}): BucketRow[] {
+  const { courseId, window } = opts;
+  const windowStart = getWindowStart(window);
+  const fmt = window === "7d" || window === "30d" ? "%Y-%m-%d" : "%Y-%W";
+
+  const rows = db
+    .select({
+      bucket: sql<string>`strftime(${fmt}, ${purchases.createdAt})`,
+      value: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
+    })
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.courseId, courseId),
+        windowStart ? gte(purchases.createdAt, windowStart) : undefined
+      )
+    )
+    .groupBy(sql`strftime(${fmt}, ${purchases.createdAt})`)
+    .orderBy(sql`strftime(${fmt}, ${purchases.createdAt})`)
+    .all();
+
+  return fillBuckets(rows, window);
+}
+
+export function getEnrollmentTrend(opts: {
+  courseId: number;
+  window: TimeWindow;
+}): BucketRow[] {
+  const { courseId, window } = opts;
+  const windowStart = getWindowStart(window);
+  const fmt = window === "7d" || window === "30d" ? "%Y-%m-%d" : "%Y-%W";
+
+  const rows = db
+    .select({
+      bucket: sql<string>`strftime(${fmt}, ${enrollments.enrolledAt})`,
+      value: sql<number>`count(*)`,
+    })
+    .from(enrollments)
+    .where(
+      and(
+        eq(enrollments.courseId, courseId),
+        windowStart ? gte(enrollments.enrolledAt, windowStart) : undefined
+      )
+    )
+    .groupBy(sql`strftime(${fmt}, ${enrollments.enrolledAt})`)
+    .orderBy(sql`strftime(${fmt}, ${enrollments.enrolledAt})`)
+    .all();
+
+  return fillBuckets(rows, window);
 }
