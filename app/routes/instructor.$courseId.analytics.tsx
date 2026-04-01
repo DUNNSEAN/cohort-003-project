@@ -8,9 +8,13 @@ import {
   getCourseAnalyticsStats,
   getRevenueOverTime,
   getEnrollmentTrend,
+  getQuizAnalyticsForCourse,
+  getLessonDropOffFunnel,
   timeWindowSchema,
   type TimeWindow,
   type BucketRow,
+  type QuizAnalyticsRow,
+  type FunnelRow,
 } from "~/services/analyticsService";
 import { TimeWindowPicker } from "~/components/analytics/time-window-picker";
 import { StatCard } from "~/components/analytics/stat-card";
@@ -29,6 +33,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Cell,
 } from "recharts";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
@@ -86,8 +91,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const stats = getCourseAnalyticsStats({ courseId, window });
   const revenueOverTime = getRevenueOverTime({ courseId, window });
   const enrollmentTrend = getEnrollmentTrend({ courseId, window });
+  const quizAnalytics = getQuizAnalyticsForCourse({ courseId, window });
+  const funnelData = getLessonDropOffFunnel({ courseId, window });
 
-  return { course, stats, window, revenueOverTime, enrollmentTrend };
+  return { course, stats, window, revenueOverTime, enrollmentTrend, quizAnalytics, funnelData };
 }
 
 // clientLoader with hydrate = true prevents SSR of charts (Recharts uses browser APIs)
@@ -108,10 +115,12 @@ export function HydrateFallback() {
           <Skeleton key={i} className="h-28 w-full rounded-xl" />
         ))}
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="mb-8 grid gap-6 lg:grid-cols-2">
         <Skeleton className="h-64 w-full rounded-xl" />
         <Skeleton className="h-64 w-full rounded-xl" />
       </div>
+      <Skeleton className="mb-8 h-48 w-full rounded-xl" />
+      <Skeleton className="h-64 w-full rounded-xl" />
     </div>
   );
 }
@@ -196,8 +205,93 @@ function EnrollmentChart({ data }: { data: BucketRow[] }) {
   );
 }
 
+function QuizTable({ rows }: { rows: QuizAnalyticsRow[] }) {
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <h2 className="mb-4 text-sm font-medium text-muted-foreground">
+        Quiz Pass Rates
+      </h2>
+      {rows.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No quiz attempts yet.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="pb-2 pr-4 font-medium">Quiz</th>
+                <th className="pb-2 pr-4 font-medium">Lesson</th>
+                <th className="pb-2 pr-4 text-right font-medium">Attempts</th>
+                <th className="pb-2 pr-4 text-right font-medium">Avg Score</th>
+                <th className="pb-2 text-right font-medium">Pass Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.quizId} className="border-b last:border-0">
+                  <td className="py-2 pr-4">{row.quizTitle}</td>
+                  <td className="py-2 pr-4 text-muted-foreground">
+                    {row.lessonTitle}
+                  </td>
+                  <td className="py-2 pr-4 text-right">{row.totalAttempts}</td>
+                  <td className="py-2 pr-4 text-right">{row.avgScore}%</td>
+                  <td className="py-2 text-right">{row.passRate}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DropOffFunnel({ data }: { data: FunnelRow[] }) {
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <h2 className="mb-4 text-sm font-medium text-muted-foreground">
+        Lesson Drop-off Funnel
+      </h2>
+      {data.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No lessons yet.
+        </p>
+      ) : (
+        <ResponsiveContainer width="100%" height={Math.max(data.length * 36, 120)}>
+          <BarChart
+            data={data}
+            layout="vertical"
+            margin={{ top: 4, right: 48, left: 8, bottom: 0 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-border" />
+            <XAxis
+              type="number"
+              domain={[0, 100]}
+              tickFormatter={(v) => `${v}%`}
+              tick={{ fontSize: 11 }}
+              tickLine={false}
+              axisLine={false}
+            />
+            <YAxis
+              type="category"
+              dataKey="lessonTitle"
+              width={140}
+              tick={{ fontSize: 11 }}
+              tickLine={false}
+              axisLine={false}
+            />
+            <Tooltip formatter={(value) => [`${value}%`, "Completion Rate"]} />
+            <Bar dataKey="completionRate" radius={[0, 3, 3, 0]} className="fill-primary" />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
+}
+
 export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
-  const { course, stats, window, revenueOverTime, enrollmentTrend } = loaderData;
+  const { course, stats, window, revenueOverTime, enrollmentTrend, quizAnalytics, funnelData } = loaderData;
   const { totalRevenue, totalEnrollments, completionRate, avgQuizScore } = stats;
 
   return (
@@ -246,10 +340,16 @@ export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="mb-8 grid gap-6 lg:grid-cols-2">
         <RevenueChart data={revenueOverTime} />
         <EnrollmentChart data={enrollmentTrend} />
       </div>
+
+      <div className="mb-8">
+        <QuizTable rows={quizAnalytics} />
+      </div>
+
+      <DropOffFunnel data={funnelData} />
     </div>
   );
 }

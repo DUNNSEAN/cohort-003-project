@@ -3,6 +3,7 @@ import { db } from "~/db";
 import {
   purchases,
   enrollments,
+  lessonProgress,
   quizAttempts,
   quizzes,
   lessons,
@@ -229,4 +230,118 @@ export function getEnrollmentTrend(opts: {
     .all();
 
   return fillBuckets(rows, window);
+}
+
+// ─── Quiz analytics ───────────────────────────────────────────────────────────
+
+export type QuizAnalyticsRow = {
+  quizId: number;
+  quizTitle: string;
+  lessonTitle: string;
+  totalAttempts: number;
+  avgScore: number;
+  passRate: number;
+};
+
+export function getQuizAnalyticsForCourse(opts: {
+  courseId: number;
+  window: TimeWindow;
+}): QuizAnalyticsRow[] {
+  const { courseId, window } = opts;
+  const windowStart = getWindowStart(window);
+
+  const rows = db
+    .select({
+      quizId: quizzes.id,
+      quizTitle: quizzes.title,
+      lessonTitle: lessons.title,
+      totalAttempts: sql<number>`count(${quizAttempts.id})`,
+      avgScore: sql<number | null>`avg(${quizAttempts.score})`,
+      passRate: sql<number | null>`avg(${quizAttempts.passed})`,
+    })
+    .from(quizzes)
+    .innerJoin(lessons, eq(quizzes.lessonId, lessons.id))
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .leftJoin(
+      quizAttempts,
+      and(
+        eq(quizAttempts.quizId, quizzes.id),
+        windowStart ? gte(quizAttempts.attemptedAt, windowStart) : undefined
+      )
+    )
+    .where(eq(modules.courseId, courseId))
+    .groupBy(quizzes.id)
+    .orderBy(modules.position, lessons.position)
+    .all();
+
+  return rows.map((row) => ({
+    quizId: row.quizId,
+    quizTitle: row.quizTitle,
+    lessonTitle: row.lessonTitle,
+    totalAttempts: row.totalAttempts,
+    avgScore: row.avgScore != null ? Math.round(row.avgScore * 100) : 0,
+    passRate: row.passRate != null ? Math.round(row.passRate * 100) : 0,
+  }));
+}
+
+// ─── Lesson drop-off funnel ───────────────────────────────────────────────────
+
+export type FunnelRow = {
+  lessonId: number;
+  lessonTitle: string;
+  moduleTitle: string;
+  completionRate: number;
+};
+
+export function getLessonDropOffFunnel(opts: {
+  courseId: number;
+  window: TimeWindow;
+}): FunnelRow[] {
+  const { courseId, window } = opts;
+  const windowStart = getWindowStart(window);
+
+  // Count enrolled students in the cohort (the funnel denominator)
+  const cohortRow = db
+    .select({ count: sql<number>`count(*)` })
+    .from(enrollments)
+    .where(
+      and(
+        eq(enrollments.courseId, courseId),
+        windowStart ? gte(enrollments.enrolledAt, windowStart) : undefined
+      )
+    )
+    .get();
+  const cohortSize = cohortRow?.count ?? 0;
+
+  // For each lesson, count distinct cohort members who completed it
+  const rows = db
+    .select({
+      lessonId: lessons.id,
+      lessonTitle: lessons.title,
+      moduleTitle: modules.title,
+      completedCount: sql<number>`count(distinct case when ${lessonProgress.status} = 'completed' and ${enrollments.id} is not null then ${lessonProgress.userId} end)`,
+    })
+    .from(lessons)
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .leftJoin(lessonProgress, eq(lessonProgress.lessonId, lessons.id))
+    .leftJoin(
+      enrollments,
+      and(
+        eq(enrollments.userId, lessonProgress.userId),
+        eq(enrollments.courseId, courseId),
+        windowStart ? gte(enrollments.enrolledAt, windowStart) : undefined
+      )
+    )
+    .where(eq(modules.courseId, courseId))
+    .groupBy(lessons.id)
+    .orderBy(modules.position, lessons.position)
+    .all();
+
+  return rows.map((row) => ({
+    lessonId: row.lessonId,
+    lessonTitle: row.lessonTitle,
+    moduleTitle: row.moduleTitle,
+    completionRate:
+      cohortSize > 0 ? Math.round((row.completedCount / cohortSize) * 100) : 0,
+  }));
 }

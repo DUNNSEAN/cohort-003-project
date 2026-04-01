@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
+import { LessonProgressStatus } from "~/db/schema";
 
 let testDb: ReturnType<typeof createTestDb>;
 let base: ReturnType<typeof seedBaseData>;
@@ -16,6 +17,8 @@ import {
   getCourseAnalyticsStats,
   getRevenueOverTime,
   getEnrollmentTrend,
+  getQuizAnalyticsForCourse,
+  getLessonDropOffFunnel,
   fillBuckets,
 } from "./analyticsService";
 
@@ -637,5 +640,410 @@ describe("getEnrollmentTrend", () => {
   it("returns empty array for 'all' window with no enrollments", () => {
     const result = getEnrollmentTrend({ courseId: base.course.id, window: "all" });
     expect(result).toEqual([]);
+  });
+});
+
+describe("getQuizAnalyticsForCourse", () => {
+  beforeEach(() => {
+    testDb = createTestDb();
+    base = seedBaseData(testDb);
+  });
+
+  it("returns empty array for a course with no quizzes", () => {
+    const result = getQuizAnalyticsForCourse({
+      courseId: base.course.id,
+      window: "30d",
+    });
+    expect(result).toEqual([]);
+  });
+
+  it("returns correct avgScore and passRate per quiz", () => {
+    const mod = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const lesson = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "Lesson 1", position: 1 })
+      .returning()
+      .get();
+    const quiz = testDb
+      .insert(schema.quizzes)
+      .values({ lessonId: lesson.id, title: "Quiz 1", passingScore: 0.7 })
+      .returning()
+      .get();
+
+    const user2 = testDb
+      .insert(schema.users)
+      .values({ name: "User 2", email: "u2@test.com", role: schema.UserRole.Student })
+      .returning()
+      .get();
+
+    testDb
+      .insert(schema.quizAttempts)
+      .values([
+        {
+          userId: base.user.id,
+          quizId: quiz.id,
+          score: 0.8,
+          passed: true,
+          attemptedAt: daysAgo(1),
+        },
+        {
+          userId: user2.id,
+          quizId: quiz.id,
+          score: 0.6,
+          passed: false,
+          attemptedAt: daysAgo(2),
+        },
+      ])
+      .run();
+
+    const result = getQuizAnalyticsForCourse({
+      courseId: base.course.id,
+      window: "30d",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].quizTitle).toBe("Quiz 1");
+    expect(result[0].lessonTitle).toBe("Lesson 1");
+    expect(result[0].totalAttempts).toBe(2);
+    expect(result[0].avgScore).toBe(70); // (0.8 + 0.6) / 2 = 0.7 → 70%
+    expect(result[0].passRate).toBe(50); // 1 of 2 passed → 50%
+  });
+
+  it("shows zero stats for quizzes with no attempts in the window", () => {
+    const mod = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const lesson = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "Lesson 1", position: 1 })
+      .returning()
+      .get();
+    testDb
+      .insert(schema.quizzes)
+      .values({ lessonId: lesson.id, title: "Quiz 1", passingScore: 0.7 })
+      .run();
+
+    const result = getQuizAnalyticsForCourse({
+      courseId: base.course.id,
+      window: "7d",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].totalAttempts).toBe(0);
+    expect(result[0].avgScore).toBe(0);
+    expect(result[0].passRate).toBe(0);
+  });
+
+  it("excludes attempts outside the time window", () => {
+    const mod = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const lesson = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "Lesson 1", position: 1 })
+      .returning()
+      .get();
+    const quiz = testDb
+      .insert(schema.quizzes)
+      .values({ lessonId: lesson.id, title: "Quiz 1", passingScore: 0.7 })
+      .returning()
+      .get();
+
+    testDb
+      .insert(schema.quizAttempts)
+      .values([
+        {
+          userId: base.user.id,
+          quizId: quiz.id,
+          score: 1.0,
+          passed: true,
+          attemptedAt: daysAgo(1),
+        }, // within 7d
+        {
+          userId: base.user.id,
+          quizId: quiz.id,
+          score: 0.0,
+          passed: false,
+          attemptedAt: daysAgo(10),
+        }, // outside 7d
+      ])
+      .run();
+
+    const result = getQuizAnalyticsForCourse({
+      courseId: base.course.id,
+      window: "7d",
+    });
+
+    expect(result[0].totalAttempts).toBe(1);
+    expect(result[0].avgScore).toBe(100);
+    expect(result[0].passRate).toBe(100);
+  });
+
+  it("orders quizzes by module then lesson position", () => {
+    const mod1 = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const mod2 = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 2", position: 2 })
+      .returning()
+      .get();
+    const lessonA = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod1.id, title: "Lesson A", position: 1 })
+      .returning()
+      .get();
+    const lessonB = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod2.id, title: "Lesson B", position: 1 })
+      .returning()
+      .get();
+    testDb
+      .insert(schema.quizzes)
+      .values({ lessonId: lessonB.id, title: "Quiz B", passingScore: 0.7 })
+      .run();
+    testDb
+      .insert(schema.quizzes)
+      .values({ lessonId: lessonA.id, title: "Quiz A", passingScore: 0.7 })
+      .run();
+
+    const result = getQuizAnalyticsForCourse({
+      courseId: base.course.id,
+      window: "all",
+    });
+
+    expect(result[0].lessonTitle).toBe("Lesson A");
+    expect(result[1].lessonTitle).toBe("Lesson B");
+  });
+
+  it("passRate returns 0 (not NaN) when there are no attempts (division-by-zero guard)", () => {
+    const mod = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const lesson = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "Lesson 1", position: 1 })
+      .returning()
+      .get();
+    testDb
+      .insert(schema.quizzes)
+      .values({ lessonId: lesson.id, title: "Quiz 1", passingScore: 0.7 })
+      .run();
+
+    const result = getQuizAnalyticsForCourse({
+      courseId: base.course.id,
+      window: "30d",
+    });
+
+    expect(result[0].passRate).toBe(0);
+    expect(Number.isNaN(result[0].passRate)).toBe(false);
+  });
+});
+
+describe("getLessonDropOffFunnel", () => {
+  beforeEach(() => {
+    testDb = createTestDb();
+    base = seedBaseData(testDb);
+  });
+
+  it("returns empty array for a course with no lessons", () => {
+    const result = getLessonDropOffFunnel({
+      courseId: base.course.id,
+      window: "30d",
+    });
+    expect(result).toEqual([]);
+  });
+
+  it("returns lessons in module/lesson position order", () => {
+    const mod1 = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const mod2 = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 2", position: 2 })
+      .returning()
+      .get();
+    testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod1.id, title: "L1", position: 1 })
+      .run();
+    testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod1.id, title: "L2", position: 2 })
+      .run();
+    testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod2.id, title: "L3", position: 1 })
+      .run();
+
+    const result = getLessonDropOffFunnel({
+      courseId: base.course.id,
+      window: "30d",
+    });
+
+    expect(result.map((r) => r.lessonTitle)).toEqual(["L1", "L2", "L3"]);
+  });
+
+  it("returns 0 for all lessons when no enrollments in the window (division-by-zero guard)", () => {
+    const mod = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "L1", position: 1 })
+      .run();
+
+    const result = getLessonDropOffFunnel({
+      courseId: base.course.id,
+      window: "30d",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].completionRate).toBe(0);
+    expect(Number.isNaN(result[0].completionRate)).toBe(false);
+  });
+
+  it("computes correct completionRate proportions", () => {
+    const mod = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const lesson1 = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "L1", position: 1 })
+      .returning()
+      .get();
+    const lesson2 = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "L2", position: 2 })
+      .returning()
+      .get();
+
+    // Enroll 2 users within window
+    const user2 = testDb
+      .insert(schema.users)
+      .values({ name: "User 2", email: "u2@test.com", role: schema.UserRole.Student })
+      .returning()
+      .get();
+
+    testDb
+      .insert(schema.enrollments)
+      .values([
+        { userId: base.user.id, courseId: base.course.id, enrolledAt: daysAgo(1) },
+        { userId: user2.id, courseId: base.course.id, enrolledAt: daysAgo(2) },
+      ])
+      .run();
+
+    // Both users completed lesson1, only user1 completed lesson2
+    testDb
+      .insert(schema.lessonProgress)
+      .values([
+        { userId: base.user.id, lessonId: lesson1.id, status: LessonProgressStatus.Completed },
+        { userId: user2.id, lessonId: lesson1.id, status: LessonProgressStatus.Completed },
+        { userId: base.user.id, lessonId: lesson2.id, status: LessonProgressStatus.Completed },
+      ])
+      .run();
+
+    const result = getLessonDropOffFunnel({
+      courseId: base.course.id,
+      window: "30d",
+    });
+
+    expect(result).toHaveLength(2);
+    expect(result[0].completionRate).toBe(100); // 2/2
+    expect(result[1].completionRate).toBe(50);  // 1/2
+  });
+
+  it("shows 0% for a lesson no student completed", () => {
+    const mod = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const lesson = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "L1", position: 1 })
+      .returning()
+      .get();
+
+    testDb
+      .insert(schema.enrollments)
+      .values({ userId: base.user.id, courseId: base.course.id, enrolledAt: daysAgo(1) })
+      .run();
+
+    // Progress exists but not completed
+    testDb
+      .insert(schema.lessonProgress)
+      .values({ userId: base.user.id, lessonId: lesson.id, status: LessonProgressStatus.InProgress })
+      .run();
+
+    const result = getLessonDropOffFunnel({
+      courseId: base.course.id,
+      window: "30d",
+    });
+
+    expect(result[0].completionRate).toBe(0);
+  });
+
+  it("does not count completions from users enrolled outside the time window", () => {
+    const mod = testDb
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Mod 1", position: 1 })
+      .returning()
+      .get();
+    const lesson = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: "L1", position: 1 })
+      .returning()
+      .get();
+
+    // user enrolled within window, user2 enrolled outside window
+    const user2 = testDb
+      .insert(schema.users)
+      .values({ name: "User 2", email: "u2@test.com", role: schema.UserRole.Student })
+      .returning()
+      .get();
+
+    testDb
+      .insert(schema.enrollments)
+      .values([
+        { userId: base.user.id, courseId: base.course.id, enrolledAt: daysAgo(1) },
+        { userId: user2.id, courseId: base.course.id, enrolledAt: daysAgo(60) }, // outside 7d
+      ])
+      .run();
+
+    // Both users completed the lesson
+    testDb
+      .insert(schema.lessonProgress)
+      .values([
+        { userId: base.user.id, lessonId: lesson.id, status: LessonProgressStatus.Completed },
+        { userId: user2.id, lessonId: lesson.id, status: LessonProgressStatus.Completed },
+      ])
+      .run();
+
+    // Cohort is just user1 (enrolled within 7d), so completionRate = 1/1 = 100%
+    const result = getLessonDropOffFunnel({
+      courseId: base.course.id,
+      window: "7d",
+    });
+
+    expect(result[0].completionRate).toBe(100);
   });
 });
