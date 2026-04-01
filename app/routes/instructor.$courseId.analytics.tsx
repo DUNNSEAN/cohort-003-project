@@ -89,8 +89,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   ) as TimeWindow;
 
   const stats = getCourseAnalyticsStats({ courseId, window });
-  const revenueOverTime = getRevenueOverTime({ courseId, window });
-  const enrollmentTrend = getEnrollmentTrend({ courseId, window });
+  const revenueOverTime = getRevenueOverTime({ courseIds: [courseId], window });
+  const enrollmentTrend = getEnrollmentTrend({ courseIds: [courseId], window });
   const quizAnalytics = getQuizAnalyticsForCourse({ courseId, window });
   const funnelData = getLessonDropOffFunnel({ courseId, window });
 

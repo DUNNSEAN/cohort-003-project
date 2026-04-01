@@ -494,7 +494,7 @@ describe("getRevenueOverTime", () => {
   });
 
   it("returns zero-filled daily buckets for 7d window with no purchases", () => {
-    const result = getRevenueOverTime({ courseId: base.course.id, window: "7d" });
+    const result = getRevenueOverTime({ courseIds: [base.course.id], window: "7d" });
     expect(result).toHaveLength(7);
     expect(result.every((r) => r.value === 0)).toBe(true);
   });
@@ -518,7 +518,7 @@ describe("getRevenueOverTime", () => {
       ])
       .run();
 
-    const result = getRevenueOverTime({ courseId: base.course.id, window: "7d" });
+    const result = getRevenueOverTime({ courseIds: [base.course.id], window: "7d" });
     expect(result).toHaveLength(7);
     // Two purchases on the same day should sum to 3000
     const total = result.reduce((sum, r) => sum + r.value, 0);
@@ -544,13 +544,13 @@ describe("getRevenueOverTime", () => {
       ])
       .run();
 
-    const result = getRevenueOverTime({ courseId: base.course.id, window: "7d" });
+    const result = getRevenueOverTime({ courseIds: [base.course.id], window: "7d" });
     const total = result.reduce((sum, r) => sum + r.value, 0);
     expect(total).toBe(500);
   });
 
   it("uses weekly buckets for 90d window", () => {
-    const result = getRevenueOverTime({ courseId: base.course.id, window: "90d" });
+    const result = getRevenueOverTime({ courseIds: [base.course.id], window: "90d" });
     // Weekly: ~13 weeks
     expect(result.length).toBeGreaterThanOrEqual(12);
     expect(result.length).toBeLessThanOrEqual(14);
@@ -561,7 +561,7 @@ describe("getRevenueOverTime", () => {
   });
 
   it("returns empty array for 'all' window with no purchases", () => {
-    const result = getRevenueOverTime({ courseId: base.course.id, window: "all" });
+    const result = getRevenueOverTime({ courseIds: [base.course.id], window: "all" });
     expect(result).toEqual([]);
   });
 });
@@ -573,7 +573,7 @@ describe("getEnrollmentTrend", () => {
   });
 
   it("returns zero-filled daily buckets for 7d window with no enrollments", () => {
-    const result = getEnrollmentTrend({ courseId: base.course.id, window: "7d" });
+    const result = getEnrollmentTrend({ courseIds: [base.course.id], window: "7d" });
     expect(result).toHaveLength(7);
     expect(result.every((r) => r.value === 0)).toBe(true);
   });
@@ -601,7 +601,7 @@ describe("getEnrollmentTrend", () => {
       ])
       .run();
 
-    const result = getEnrollmentTrend({ courseId: base.course.id, window: "7d" });
+    const result = getEnrollmentTrend({ courseIds: [base.course.id], window: "7d" });
     const total = result.reduce((sum, r) => sum + r.value, 0);
     expect(total).toBe(2);
   });
@@ -623,13 +623,13 @@ describe("getEnrollmentTrend", () => {
       ])
       .run();
 
-    const result = getEnrollmentTrend({ courseId: base.course.id, window: "7d" });
+    const result = getEnrollmentTrend({ courseIds: [base.course.id], window: "7d" });
     const total = result.reduce((sum, r) => sum + r.value, 0);
     expect(total).toBe(1);
   });
 
   it("uses weekly buckets for 90d window", () => {
-    const result = getEnrollmentTrend({ courseId: base.course.id, window: "90d" });
+    const result = getEnrollmentTrend({ courseIds: [base.course.id], window: "90d" });
     expect(result.length).toBeGreaterThanOrEqual(12);
     expect(result.length).toBeLessThanOrEqual(14);
     for (const r of result) {
@@ -638,7 +638,7 @@ describe("getEnrollmentTrend", () => {
   });
 
   it("returns empty array for 'all' window with no enrollments", () => {
-    const result = getEnrollmentTrend({ courseId: base.course.id, window: "all" });
+    const result = getEnrollmentTrend({ courseIds: [base.course.id], window: "all" });
     expect(result).toEqual([]);
   });
 });

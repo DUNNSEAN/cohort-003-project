@@ -11,6 +11,30 @@ import { AlertTriangle, BookOpen, GraduationCap, Plus, Users } from "lucide-reac
 import { CourseImage } from "~/components/course-image";
 import { data, isRouteErrorResponse } from "react-router";
 import { CourseStatus, UserRole } from "~/db/schema";
+import {
+  getGlobalOverviewStats,
+  getCourseOverviewRows,
+  getRevenueOverTime,
+  getEnrollmentTrend,
+  timeWindowSchema,
+  type TimeWindow,
+  type BucketRow,
+  type CourseOverviewRow,
+} from "~/services/analyticsService";
+import { TimeWindowPicker } from "~/components/analytics/time-window-picker";
+import { StatCard } from "~/components/analytics/stat-card";
+import * as v from "valibot";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 export function meta() {
   return [
@@ -36,6 +60,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
+  const url = new URL(request.url);
+  const rawWindow = url.searchParams.get("window") ?? "30d";
+  const window = v.parse(v.fallback(timeWindowSchema, "30d"), rawWindow) as TimeWindow;
+
   const instructorCourses = getCoursesByInstructor(currentUserId);
 
   const coursesWithStats = instructorCourses.map((course) => {
@@ -56,8 +84,21 @@ export async function loader({ request }: Route.LoaderArgs) {
     };
   });
 
-  return { courses: coursesWithStats };
+  const courseIds = instructorCourses.map((c) => c.id);
+
+  const globalStats = getGlobalOverviewStats({ instructorId: currentUserId, window });
+  const courseOverviewRows = getCourseOverviewRows({ instructorId: currentUserId, window });
+  const revenueOverTime = getRevenueOverTime({ courseIds, window });
+  const enrollmentTrend = getEnrollmentTrend({ courseIds, window });
+
+  return { courses: coursesWithStats, window, globalStats, courseOverviewRows, revenueOverTime, enrollmentTrend };
 }
+
+// clientLoader with hydrate = true prevents SSR of Recharts components
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  return await serverLoader();
+}
+clientLoader.hydrate = true;
 
 function statusBadge(status: string) {
   switch (status) {
@@ -84,6 +125,129 @@ function statusBadge(status: string) {
   }
 }
 
+function formatRevenue(cents: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(cents / 100);
+}
+
+function formatRevenueLabel(cents: number): string {
+  if (cents >= 100000) return `$${(cents / 100000).toFixed(1)}k`;
+  return formatRevenue(cents);
+}
+
+function GlobalRevenueChart({ data }: { data: BucketRow[] }) {
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <h2 className="mb-4 text-sm font-medium text-muted-foreground">
+        Revenue Over Time
+      </h2>
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+          <XAxis
+            dataKey="bucket"
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            tickFormatter={formatRevenueLabel}
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            width={56}
+          />
+          <Tooltip
+            formatter={(value) => [formatRevenue(Number(value)), "Revenue"]}
+          />
+          <Line
+            type="monotone"
+            dataKey="value"
+            strokeWidth={2}
+            dot={false}
+            className="stroke-primary"
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function GlobalEnrollmentChart({ data }: { data: BucketRow[] }) {
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <h2 className="mb-4 text-sm font-medium text-muted-foreground">
+        Enrollment Trend
+      </h2>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+          <XAxis
+            dataKey="bucket"
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            allowDecimals={false}
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            width={32}
+          />
+          <Tooltip formatter={(value) => [Number(value), "Enrollments"]} />
+          <Bar dataKey="value" className="fill-primary" radius={[3, 3, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function CourseOverviewTable({ rows }: { rows: CourseOverviewRow[] }) {
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <h2 className="mb-4 text-sm font-medium text-muted-foreground">
+        Course Summary
+      </h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-muted-foreground">
+              <th className="pb-2 pr-4 font-medium">Course</th>
+              <th className="pb-2 pr-4 text-right font-medium">Revenue</th>
+              <th className="pb-2 pr-4 text-right font-medium">Enrollments</th>
+              <th className="pb-2 pr-4 text-right font-medium">Completion</th>
+              <th className="pb-2 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.courseId} className="border-b last:border-0">
+                <td className="py-2 pr-4 font-medium">{row.courseTitle}</td>
+                <td className="py-2 pr-4 text-right">
+                  {formatRevenue(row.totalRevenue)}
+                </td>
+                <td className="py-2 pr-4 text-right">{row.totalEnrollments}</td>
+                <td className="py-2 pr-4 text-right">{row.completionRate}%</td>
+                <td className="py-2 text-right">
+                  <Link
+                    to={`/instructor/${row.courseId}/analytics`}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    View analytics
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function HydrateFallback() {
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -94,25 +258,44 @@ export function HydrateFallback() {
         </div>
         <Skeleton className="h-10 w-32" />
       </div>
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mb-6 flex items-center justify-between">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-9 w-64" />
+      </div>
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i} className="flex flex-col">
-            <Skeleton className="aspect-video rounded-b-none rounded-t-lg" />
-            <CardHeader>
-              <Skeleton className="h-5 w-3/4" />
-              <Skeleton className="h-4 w-full" />
-            </CardHeader>
-            <CardContent className="flex-1">
-              <div className="flex items-center gap-4">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-20" />
-              </div>
-            </CardContent>
-            <CardFooter>
-              <Skeleton className="h-10 w-full" />
-            </CardFooter>
-          </Card>
+          <Skeleton key={i} className="h-28 w-full rounded-xl" />
         ))}
+      </div>
+      <div className="mb-6 grid gap-6 lg:grid-cols-2">
+        <Skeleton className="h-64 w-full rounded-xl" />
+        <Skeleton className="h-64 w-full rounded-xl" />
+      </div>
+      <Skeleton className="mb-8 h-48 w-full rounded-xl" />
+      <div className="mt-8">
+        <div className="mb-4 flex items-center justify-between">
+          <Skeleton className="h-8 w-32" />
+        </div>
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="flex flex-col">
+              <Skeleton className="aspect-video rounded-b-none rounded-t-lg" />
+              <CardHeader>
+                <Skeleton className="h-5 w-3/4" />
+                <Skeleton className="h-4 w-full" />
+              </CardHeader>
+              <CardContent className="flex-1">
+                <div className="flex items-center gap-4">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-20" />
+                </div>
+              </CardContent>
+              <CardFooter>
+                <Skeleton className="h-10 w-full" />
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -121,7 +304,8 @@ export function HydrateFallback() {
 export default function InstructorDashboard({
   loaderData,
 }: Route.ComponentProps) {
-  const { courses } = loaderData;
+  const { courses, window, globalStats, courseOverviewRows, revenueOverTime, enrollmentTrend } = loaderData;
+  const { totalRevenue, totalEnrollments, completionRate } = globalStats;
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -148,6 +332,33 @@ export default function InstructorDashboard({
           </Button>
         </Link>
       </div>
+
+      {courses.length > 0 && (
+        <>
+          {/* Global analytics overview */}
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <h2 className="text-lg font-semibold">Overview</h2>
+            <TimeWindowPicker current={window} />
+          </div>
+
+          <div className="mb-6 grid gap-4 sm:grid-cols-3">
+            <StatCard title="Total Revenue" value={formatRevenue(totalRevenue)} />
+            <StatCard title="Total Enrollments" value={String(totalEnrollments)} />
+            <StatCard title="Completion Rate" value={`${completionRate}%`} />
+          </div>
+
+          <div className="mb-6 grid gap-6 lg:grid-cols-2">
+            <GlobalRevenueChart data={revenueOverTime} />
+            <GlobalEnrollmentChart data={enrollmentTrend} />
+          </div>
+
+          <div className="mb-10">
+            <CourseOverviewTable rows={courseOverviewRows} />
+          </div>
+
+          <h2 className="mb-4 text-lg font-semibold">All Courses</h2>
+        </>
+      )}
 
       {courses.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">

@@ -1,4 +1,4 @@
-import { eq, and, gte, sql, isNotNull } from "drizzle-orm";
+import { eq, and, gte, sql, isNotNull, inArray } from "drizzle-orm";
 import { db } from "~/db";
 import {
   purchases,
@@ -8,6 +8,7 @@ import {
   quizzes,
   lessons,
   modules,
+  courses,
 } from "~/db/schema";
 import * as v from "valibot";
 
@@ -179,12 +180,14 @@ export function fillBuckets(rows: BucketRow[], window: TimeWindow): BucketRow[] 
 }
 
 export function getRevenueOverTime(opts: {
-  courseId: number;
+  courseIds: number[];
   window: TimeWindow;
 }): BucketRow[] {
-  const { courseId, window } = opts;
+  const { courseIds, window } = opts;
   const windowStart = getWindowStart(window);
   const fmt = window === "7d" || window === "30d" ? "%Y-%m-%d" : "%Y-%W";
+
+  if (courseIds.length === 0) return fillBuckets([], window);
 
   const rows = db
     .select({
@@ -194,7 +197,7 @@ export function getRevenueOverTime(opts: {
     .from(purchases)
     .where(
       and(
-        eq(purchases.courseId, courseId),
+        inArray(purchases.courseId, courseIds),
         windowStart ? gte(purchases.createdAt, windowStart) : undefined
       )
     )
@@ -206,12 +209,14 @@ export function getRevenueOverTime(opts: {
 }
 
 export function getEnrollmentTrend(opts: {
-  courseId: number;
+  courseIds: number[];
   window: TimeWindow;
 }): BucketRow[] {
-  const { courseId, window } = opts;
+  const { courseIds, window } = opts;
   const windowStart = getWindowStart(window);
   const fmt = window === "7d" || window === "30d" ? "%Y-%m-%d" : "%Y-%W";
+
+  if (courseIds.length === 0) return fillBuckets([], window);
 
   const rows = db
     .select({
@@ -221,7 +226,7 @@ export function getEnrollmentTrend(opts: {
     .from(enrollments)
     .where(
       and(
-        eq(enrollments.courseId, courseId),
+        inArray(enrollments.courseId, courseIds),
         windowStart ? gte(enrollments.enrolledAt, windowStart) : undefined
       )
     )
@@ -344,4 +349,124 @@ export function getLessonDropOffFunnel(opts: {
     completionRate:
       cohortSize > 0 ? Math.round((row.completedCount / cohortSize) * 100) : 0,
   }));
+}
+
+// ─── Global overview ──────────────────────────────────────────────────────────
+
+export function getGlobalOverviewStats(opts: {
+  instructorId: number;
+  window: TimeWindow;
+}) {
+  const { instructorId, window } = opts;
+  const windowStart = getWindowStart(window);
+
+  const instructorCourseIds = db
+    .select({ id: courses.id })
+    .from(courses)
+    .where(eq(courses.instructorId, instructorId))
+    .all()
+    .map((c) => c.id);
+
+  if (instructorCourseIds.length === 0) {
+    return { totalRevenue: 0, totalEnrollments: 0, completionRate: 0 };
+  }
+
+  const revenueRow = db
+    .select({ total: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)` })
+    .from(purchases)
+    .where(
+      and(
+        inArray(purchases.courseId, instructorCourseIds),
+        windowStart ? gte(purchases.createdAt, windowStart) : undefined
+      )
+    )
+    .get();
+  const totalRevenue = revenueRow?.total ?? 0;
+
+  const enrollmentRow = db
+    .select({
+      total: sql<number>`count(*)`,
+      completed: sql<number>`count(case when ${enrollments.completedAt} is not null then 1 end)`,
+    })
+    .from(enrollments)
+    .where(
+      and(
+        inArray(enrollments.courseId, instructorCourseIds),
+        windowStart ? gte(enrollments.enrolledAt, windowStart) : undefined
+      )
+    )
+    .get();
+  const totalEnrollments = enrollmentRow?.total ?? 0;
+  const completedCount = enrollmentRow?.completed ?? 0;
+  const completionRate =
+    totalEnrollments > 0
+      ? Math.round((completedCount / totalEnrollments) * 100)
+      : 0;
+
+  return { totalRevenue, totalEnrollments, completionRate };
+}
+
+export type CourseOverviewRow = {
+  courseId: number;
+  courseTitle: string;
+  totalRevenue: number;
+  totalEnrollments: number;
+  completionRate: number;
+};
+
+export function getCourseOverviewRows(opts: {
+  instructorId: number;
+  window: TimeWindow;
+}): CourseOverviewRow[] {
+  const { instructorId, window } = opts;
+  const windowStart = getWindowStart(window);
+
+  const instructorCourses = db
+    .select({ id: courses.id, title: courses.title })
+    .from(courses)
+    .where(eq(courses.instructorId, instructorId))
+    .all();
+
+  return instructorCourses.map((course) => {
+    const revenueRow = db
+      .select({ total: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)` })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.courseId, course.id),
+          windowStart ? gte(purchases.createdAt, windowStart) : undefined
+        )
+      )
+      .get();
+
+    const enrollmentRow = db
+      .select({
+        total: sql<number>`count(*)`,
+        completed: sql<number>`count(case when ${enrollments.completedAt} is not null then 1 end)`,
+      })
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.courseId, course.id),
+          windowStart ? gte(enrollments.enrolledAt, windowStart) : undefined
+        )
+      )
+      .get();
+
+    const totalRevenue = revenueRow?.total ?? 0;
+    const totalEnrollments = enrollmentRow?.total ?? 0;
+    const completedCount = enrollmentRow?.completed ?? 0;
+    const completionRate =
+      totalEnrollments > 0
+        ? Math.round((completedCount / totalEnrollments) * 100)
+        : 0;
+
+    return {
+      courseId: course.id,
+      courseTitle: course.title,
+      totalRevenue,
+      totalEnrollments,
+      completionRate,
+    };
+  });
 }
